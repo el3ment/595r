@@ -9,30 +9,83 @@ matplotlib.rcParams['figure.figsize'] = (17.0, 17.0)
 
 
 class Estimator:
-    def __init__(self, initial, landmarks):
+    def __init__(self, initial, landmarks, alpha=[0.1, 0.01, 0.01, 0.1], sigR=0.1, sigB=0.05, al=1.0 ,kap=1.0):
         self.x_hat = initial
-        self.P = np.eye(self.x_hat.shape[0]) * 0.1
+        self.P = np.diag([2,2,np.pi/4]) # np.eye(self.x_hat.shape[0]) * 0.1
         self.landmarks = landmarks
+        self.alpha = alpha
+        self.R = np.diag([sigR,sigB])
+
+        self.lamb = al**2*(7 + kap) - 7
+        self.gamma = np.sqrt(7 + self.lamb)
+        self.w_m = np.concatenate(([[self.lamb/(7 + self.lamb)]], np.ones((1,2*7))/2/(7 + self.lamb)), axis=1)
+        self.w_c = np.concatenate(([[self.lamb/(7 + self.lamb) + (1 - al**2 + 2)]], np.ones((1,2*7))/2/(7 + self.lamb)), axis=1)
 
     def propagate(self, dt, u):
-        self.x_hat = self.dynamics(dt, self.x_hat, u)
+        if u.sum() == 0:
+            v = 0.000001
+            w = 0.000001
+        else:
+            v = u[0,0]
+            w = u[1,0]
+        print '!!!!!!'
+        x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
+        Qu = np.diag([(self.alpha[0]*np.abs(v) + self.alpha[1]*np.abs(w))**2, (self.alpha[2]*np.abs(v) + self.alpha[3]*np.abs(w))**2])
+        Z_2 = np.zeros((2,2))
+        Z_3 = np.zeros((3,2))
+        P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
 
-        # TODO: implement propagation step here
+        L = np.linalg.cholesky(P_a)
+        chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
+
+        # g(u + chi_u,chi_x)
+        for i in range(2*7 + 1):
+            chi_a[0:3,i:i+1] = self.dynamics(dt, chi_a[0:3,i:i+1], u + chi_a[3:5,i:i+1])
+
+        self.x_hat = np.atleast_2d(np.sum(self.w_m*chi_a[0:3,:],axis=1)).T
+
+        self.P = (self.w_c*(chi_a[0:3,:] - self.x_hat)).dot((chi_a[0:3,:] - self.x_hat).T)
+
+        self.chi_a = chi_a
 
         return self.x_hat, self.P
 
     def update(self, dt, z):
-        zhat = self.measure(dt, self.x_hat)
-
+        print '-----'
         # compute the difference betwee then predicted and measured 22 landmark measurements
         # (i.e range and bearing for 11 landmarks)
         # then remove all the nans, only leaving the landmarks we can see
         # additionally, visible_landmarks contains a vector of visible landmark indexes
         visible_landmarks = np.where(~np.isnan(z[::2, 0]))[0]
-        zdiff = zhat - z
-        zdiff = zdiff[~np.isnan(zdiff)]
 
-        # TODO: implement update step here
+        for vis_lndmrk in visible_landmarks:
+
+            # regenerate simga points
+            v = 0.000001
+            w = 0.000001
+
+            x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
+            Qu = np.diag([(self.alpha[0]*np.abs(v) + self.alpha[1]*np.abs(w))**2, (self.alpha[2]*np.abs(v) + self.alpha[3]*np.abs(w))**2])
+            Z_2 = np.zeros((2,2))
+            Z_3 = np.zeros((3,2))
+            P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
+
+            L = np.linalg.cholesky(P_a)
+            chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
+
+            lma = self.landmarks[vis_lndmrk,:].T
+            Zbar = np.empty((2,2*7 + 1))
+            for j in range(2*7 + 1):
+                Zbar[:,j:j+1] = self.measure(dt, self.chi_a[0:3,j:j+1])[2*vis_lndmrk:2*vis_lndmrk+2]
+
+            zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
+
+            S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
+            P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
+            K = P_Ct.dot(np.linalg.inv(S))
+
+            self.x_hat = self.x_hat + K.dot(z[2*vis_lndmrk:2*vis_lndmrk+2,:] - zhat)
+            self.P = self.P - K.dot(S).dot(K.T)
 
         return self.x_hat, self.P
 
@@ -55,8 +108,7 @@ class Estimator:
 
     def dynamics(self, dt, x, u):
         # prevent anyone from making a mistake here
-        assert u.shape == (2, 1) and x.shape == (
-        3, 1), "bad shapes for dynamics: {} should be (2,1) and {} should be (3,1)".format(u.shape, x.shape)
+        assert u.shape == (2, 1) and x.shape == (3, 1), "bad shapes for dynamics: {} should be (2,1) and {} should be (3,1)".format(u.shape, x.shape)
 
         noise_v, noise_omega = 0, 0
         v, omega = u[0] + noise_v, u[1] + noise_omega
@@ -135,4 +187,3 @@ plt.plot(x_history.T[0], x_history.T[1], label='estimated_position')
 plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
 plt.legend()
 plt.show()
-
