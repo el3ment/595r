@@ -9,7 +9,7 @@ matplotlib.rcParams['figure.figsize'] = (17.0, 17.0)
 
 
 class Estimator:
-    def __init__(self, initial, landmarks, alpha=[1.0, 0.01, 10.0, 0.1], sigR=5.0, sigB=5.0, al=1.0 ,kap=1.0):
+    def __init__(self, initial, landmarks, alpha=[1.0, 0.01, 10.0, 0.1], sigR=1.0, sigB=1.0, al=1.0 ,kap=1.0):
         self.x_hat = initial
         self.P = np.diag([0.1,0.1,np.pi/2]) # np.eye(self.x_hat.shape[0]) * 0.1
         self.landmarks = landmarks
@@ -59,7 +59,7 @@ class Estimator:
         # additionally, visible_landmarks contains a vector of visible landmark indexes
         visible_landmarks = np.where(~np.isnan(z[::2, 0]))[0]
         # print "visible_landmarks", visible_landmarks
-        visible_landmarks = visible_landmarks[0]
+        visible_landmarks = visible_landmarks
 
         # regenerate simga points
         x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
@@ -72,16 +72,18 @@ class Estimator:
         # I think we need it to make all of the measurement updates in one
         # i.e. only one update of x_hat, P no matter how many landmarks are visible
         meas_idx = []
-        # for v in visible_landmarks:
-        meas_idx.append(visible_landmarks*2)
-        meas_idx.append(visible_landmarks*2 + 1)
+        adder = np.empty((2*len(visible_landmarks), 2*5 + 1))
+        for idx, v in enumerate(visible_landmarks):
+            meas_idx.append(v*2)
+            meas_idx.append(v*2 + 1)
+            adder[idx:idx+2, :] = chi_a[3:5, :]
         # lma = self.landmarks[visible_landmarks,:].T
-        Zbar = np.empty((2,2*5 + 1))
-        # Zbar = np.empty((2*len(visible_landmarks),2*7 + 1))
+        # Zbar = np.empty((2,2*5 + 1))
+        Zbar = np.empty((2*len(visible_landmarks),2*5 + 1))
         for j in range(2*5 + 1):
-            # print "Measure", self.measure(self.chi_a[0:3,j:j+1])
-            Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + self.chi_a[3:5,j:j+1]
 
+            Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + adder[:,j:j+1]
+            # Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + self.chi_a[3:5,j:j+1]
         zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
         # print "Zbar", Zbar
         # print "zhat", zhat
@@ -96,7 +98,7 @@ class Estimator:
             residual[1,:] -= 2*np.pi
         if residual[1,:] < -np.pi:
             residual[1,:] += 2*np.pi
-        # print "Residual", residual
+        print "Residual", residual
         self.x_hat = self.x_hat + K.dot(residual)
         self.P = self.P - K.dot(S).dot(K.T)
 
@@ -218,5 +220,5 @@ plt.figure(2)
 plt.plot(odometry_pos.T[0], odometry_pos.T[1], label='odometry_position')
 plt.plot(x_history.T[0], x_history.T[1], label='estimated_position')
 plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
-plt.legend()
+plt.legend(loc='upper left')
 plt.show()
