@@ -80,7 +80,7 @@ class Estimator:
         # Zbar = np.empty((2*len(visible_landmarks),2*7 + 1))
         for j in range(2*5 + 1):
             # print "Measure", self.measure(self.chi_a[0:3,j:j+1])
-            Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx]
+            Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + self.chi_a[3:5,j:j+1]
 
         zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
         # print "Zbar", Zbar
