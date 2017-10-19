@@ -28,9 +28,9 @@ class Estimator:
         else:
             v = u[0,0]
             w = u[1,0]
-        print '!!!!!!'
+        print "!!!!!propagate!!!!!"
         x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
-        Qu = np.diag([(self.alpha[0]*np.abs(v) + self.alpha[1]*np.abs(w))**2, (self.alpha[2]*np.abs(v) + self.alpha[3]*np.abs(w))**2])
+        Qu = np.diag([(self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
         Z_2 = np.zeros((2,2))
         Z_3 = np.zeros((3,2))
         P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
@@ -51,41 +51,51 @@ class Estimator:
         return self.x_hat, self.P
 
     def update(self, dt, z):
-        print '-----'
+        print "-----update-----"
         # compute the difference betwee then predicted and measured 22 landmark measurements
         # (i.e range and bearing for 11 landmarks)
         # then remove all the nans, only leaving the landmarks we can see
         # additionally, visible_landmarks contains a vector of visible landmark indexes
         visible_landmarks = np.where(~np.isnan(z[::2, 0]))[0]
+        # print "visible_landmarks", visible_landmarks
+        visible_landmarks = visible_landmarks[0]
 
-        for vis_lndmrk in visible_landmarks:
+        # regenerate simga points
+        v = 0.000001
+        w = 0.000001
 
-            # regenerate simga points
-            v = 0.000001
-            w = 0.000001
+        x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
+        Qu = np.diag([(self.alpha[0]*np.abs(v) + self.alpha[1]*np.abs(w))**2, (self.alpha[2]*np.abs(v) + self.alpha[3]*np.abs(w))**2])
+        Z_2 = np.zeros((2,2))
+        Z_3 = np.zeros((3,2))
+        P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
 
-            x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
-            Qu = np.diag([(self.alpha[0]*np.abs(v) + self.alpha[1]*np.abs(w))**2, (self.alpha[2]*np.abs(v) + self.alpha[3]*np.abs(w))**2])
-            Z_2 = np.zeros((2,2))
-            Z_3 = np.zeros((3,2))
-            P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
+        L = np.linalg.cholesky(P_a)
+        chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
 
-            L = np.linalg.cholesky(P_a)
-            chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
+        # I think we need it to make all of the measurement updates in one
+        # i.e. only one update of x_hat, P no matter how many landmarks are visible
+        meas_idx = []
+        # for v in visible_landmarks:
+        meas_idx.append(visible_landmarks*2)
+        meas_idx.append(visible_landmarks*2 + 1)
+        # lma = self.landmarks[visible_landmarks,:].T
+        Zbar = np.empty((2,2*7 + 1))
+        # Zbar = np.empty((2*len(visible_landmarks),2*7 + 1))
+        for j in range(2*7 + 1):
+            # print "Measure", self.measure(dt, self.chi_a[0:3,j:j+1])
+            Zbar[:,j:j+1] = self.measure(dt, self.chi_a[0:3,j:j+1])[meas_idx]
 
-            lma = self.landmarks[vis_lndmrk,:].T
-            Zbar = np.empty((2,2*7 + 1))
-            for j in range(2*7 + 1):
-                Zbar[:,j:j+1] = self.measure(dt, self.chi_a[0:3,j:j+1])[2*vis_lndmrk:2*vis_lndmrk+2]
+        zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
+        print "Zbar", Zbar
+        print "z", zhat
+        print "Residual", Zbar - zhat
+        S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
+        P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
+        K = P_Ct.dot(np.linalg.inv(S))
 
-            zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
-
-            S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
-            P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
-            K = P_Ct.dot(np.linalg.inv(S))
-
-            self.x_hat = self.x_hat + K.dot(z[2*vis_lndmrk:2*vis_lndmrk+2,:] - zhat)
-            self.P = self.P - K.dot(S).dot(K.T)
+        self.x_hat = self.x_hat + K.dot(z[meas_idx] - zhat)
+        self.P = self.P - K.dot(S).dot(K.T)
 
         return self.x_hat, self.P
 
@@ -134,12 +144,18 @@ odometry_vel = matfile['vel_odom'].T
 odometry_pos = matfile['pos_odom_se2'].T
 x_hat = odometry_pos[0, None].T  # (3, 1)
 
+# Fix times so we start at 0
+odometry_t = odometry_t - np.min(odometry_t)
+landmark_t = landmark_t - np.min(odometry_t)
+
 estimator = Estimator(initial=x_hat, landmarks=landmarks)
 measurement_index = 0
 x_history = []
 p_history = []
 
-for i, (t, dt) in enumerate(zip(odometry_t, np.diff(np.concatenate([[0], odometry_t])))):
+for i, (t, dt) in enumerate(zip(odometry_t, np.diff(np.concatenate([[0],odometry_t])))):
+    print "--------------------------"
+    print "i =", i
     u = odometry_vel[i, None].T  # (2, 1)
 
     # if we have stepped over a landmark measurement, and there exists a measurement
