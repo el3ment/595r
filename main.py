@@ -9,17 +9,17 @@ matplotlib.rcParams['figure.figsize'] = (17.0, 17.0)
 
 
 class Estimator:
-    def __init__(self, initial, landmarks, alpha=[0.1, 0.01, 0.01, 0.1], sigR=0.1, sigB=0.05, al=1.0 ,kap=1.0):
+    def __init__(self, initial, landmarks, alpha=[1.0, 0.01, 10.0, 0.1], sigR=5.0, sigB=5.0, al=1.0 ,kap=1.0):
         self.x_hat = initial
-        self.P = np.diag([2,2,np.pi/4]) # np.eye(self.x_hat.shape[0]) * 0.1
+        self.P = np.diag([0.1,0.1,np.pi/2]) # np.eye(self.x_hat.shape[0]) * 0.1
         self.landmarks = landmarks
         self.alpha = alpha
         self.R = np.diag([sigR,sigB])
 
-        self.lamb = al**2*(7 + kap) - 7
-        self.gamma = np.sqrt(7 + self.lamb)
-        self.w_m = np.concatenate(([[self.lamb/(7 + self.lamb)]], np.ones((1,2*7))/2/(7 + self.lamb)), axis=1)
-        self.w_c = np.concatenate(([[self.lamb/(7 + self.lamb) + (1 - al**2 + 2)]], np.ones((1,2*7))/2/(7 + self.lamb)), axis=1)
+        self.lamb = al**2*(5 + kap) - 5
+        self.gamma = np.sqrt(5 + self.lamb)
+        self.w_m = np.concatenate(([[self.lamb/(5 + self.lamb)]], np.ones((1,2*5))/2/(5 + self.lamb)), axis=1)
+        self.w_c = np.concatenate(([[self.lamb/(5 + self.lamb) + (1 - al**2 + 2)]], np.ones((1,2*5))/2/(5 + self.lamb)), axis=1)
 
     def propagate(self, dt, u):
         if u.sum() == 0:
@@ -29,17 +29,18 @@ class Estimator:
             v = u[0,0]
             w = u[1,0]
         print "!!!!!propagate!!!!!"
-        x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
-        Qu = np.diag([(self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
+        x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
+        Qu = np.diag([0.01 + (self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), 0.01 + (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
         Z_2 = np.zeros((2,2))
         Z_3 = np.zeros((3,2))
-        P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
+        P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, Qu]]))
 
         L = np.linalg.cholesky(P_a)
         chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
 
         # g(u + chi_u,chi_x)
-        for i in range(2*7 + 1):
+        chi_a_p = chi_a.copy()
+        for i in range(2*5 + 1):
             chi_a[0:3,i:i+1] = self.dynamics(dt, chi_a[0:3,i:i+1], u + chi_a[3:5,i:i+1])
 
         self.x_hat = np.atleast_2d(np.sum(self.w_m*chi_a[0:3,:],axis=1)).T
@@ -50,7 +51,7 @@ class Estimator:
 
         return self.x_hat, self.P
 
-    def update(self, dt, z):
+    def update(self, z):
         print "-----update-----"
         # compute the difference betwee then predicted and measured 22 landmark measurements
         # (i.e range and bearing for 11 landmarks)
@@ -61,14 +62,9 @@ class Estimator:
         visible_landmarks = visible_landmarks[0]
 
         # regenerate simga points
-        v = 0.000001
-        w = 0.000001
-
-        x_a = np.concatenate((self.x_hat, np.zeros((4, 1))), axis=0)
-        Qu = np.diag([(self.alpha[0]*np.abs(v) + self.alpha[1]*np.abs(w))**2, (self.alpha[2]*np.abs(v) + self.alpha[3]*np.abs(w))**2])
-        Z_2 = np.zeros((2,2))
+        x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
         Z_3 = np.zeros((3,2))
-        P_a = np.asarray(np.bmat([[self.P, Z_3, Z_3], [Z_3.T, Qu, Z_2], [Z_3.T, Z_2.T, self.R]]))
+        P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, self.R]]))
 
         L = np.linalg.cholesky(P_a)
         chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
@@ -80,26 +76,33 @@ class Estimator:
         meas_idx.append(visible_landmarks*2)
         meas_idx.append(visible_landmarks*2 + 1)
         # lma = self.landmarks[visible_landmarks,:].T
-        Zbar = np.empty((2,2*7 + 1))
+        Zbar = np.empty((2,2*5 + 1))
         # Zbar = np.empty((2*len(visible_landmarks),2*7 + 1))
-        for j in range(2*7 + 1):
-            # print "Measure", self.measure(dt, self.chi_a[0:3,j:j+1])
-            Zbar[:,j:j+1] = self.measure(dt, self.chi_a[0:3,j:j+1])[meas_idx]
+        for j in range(2*5 + 1):
+            # print "Measure", self.measure(self.chi_a[0:3,j:j+1])
+            Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx]
 
         zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
-        print "Zbar", Zbar
-        print "z", zhat
-        print "Residual", Zbar - zhat
+        # print "Zbar", Zbar
+        # print "zhat", zhat
+        # print "z", z[meas_idx]
+
         S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
         P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
         K = P_Ct.dot(np.linalg.inv(S))
 
-        self.x_hat = self.x_hat + K.dot(z[meas_idx] - zhat)
+        residual = z[meas_idx] - zhat
+        if residual[1,:] > np.pi:
+            residual[1,:] -= 2*np.pi
+        if residual[1,:] < -np.pi:
+            residual[1,:] += 2*np.pi
+        # print "Residual", residual
+        self.x_hat = self.x_hat + K.dot(residual)
         self.P = self.P - K.dot(S).dot(K.T)
 
         return self.x_hat, self.P
 
-    def measure(self, dt, x, Q=None):
+    def measure(self, x, Q=None):
         # prevent anyone from making a mistake here
         assert x.shape == (3, 1) and (
         Q is None or Q.shape == (3, 3)), "bad shapes for measurement: {} should be (3,1) and {} should be (3,3)".format(
@@ -153,6 +156,9 @@ measurement_index = 0
 x_history = []
 p_history = []
 
+plt.figure(0)
+plt.ion()
+
 for i, (t, dt) in enumerate(zip(odometry_t, np.diff(np.concatenate([[0],odometry_t])))):
     print "--------------------------"
     print "i =", i
@@ -168,28 +174,38 @@ for i, (t, dt) in enumerate(zip(odometry_t, np.diff(np.concatenate([[0],odometry
                                       landmark_bearing[measurement_index]]))[:, None]
 
         # this propagate step will be the last odometry to the landmark sensor measurement
-        x_hat, P = estimator.propagate(fractional_dt, u)
+        # x_hat, P = estimator.propagate(fractional_dt, u)
 
         # update the model
-        x_hat, P = estimator.update(fractional_dt, z)
+        x_hat, P = estimator.update(z)
 
         # the next propagate step will be the time from after the measurement
         # to the next odometry message
-        dt = t - landmark_t[measurement_index]
+        # dt = t - landmark_t[measurement_index]
 
         measurement_index += 1
 
     x_hat, P = estimator.propagate(dt, u)
+    # print np.linalg.eigvals(P)
 
     x_history.append(x_hat[:, 0])
     p_history.append(P)
+
+    [[x],[y],[t]] = x_hat
+    plt.clf()
+    plt.scatter(x, y)
+    plt.scatter(x + 0.5*np.cos(t), y + 0.5*np.sin(t), color='r')
+    plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
+    plt.pause(0.00001)
+plt.ioff()
 
 x_history = np.array(x_history)
 p_history = np.array(p_history)
 
 # plot the x,y,theta
 # and confidence intervals
-plt.subplot(2, 1, 1)
+# plt.subplot(2, 1, 1)
+plt.figure(1)
 [plt.plot(odometry_t, y.T, label=l) for y, l in zip(odometry_pos.T, ['x_odometry', 'y_odometry', 'theta_odometry'])]
 [plt.plot(odometry_t, y.T, label=l) for y, l in zip(x_history.T, ['x_hat', 'y_hat', 'theta_hat'])]
 [plt.plot(odometry_t, x_history[:, i] + 3.0 * p_history[:, i, i] ** 0.5, '-k', alpha=0.5) for i in range(3)]
@@ -197,7 +213,8 @@ plt.subplot(2, 1, 1)
 plt.legend()
 
 # plot the global position and landmarks
-plt.subplot(2, 1, 2)
+# plt.subplot(2, 1, 2)
+plt.figure(2)
 plt.plot(odometry_pos.T[0], odometry_pos.T[1], label='odometry_position')
 plt.plot(x_history.T[0], x_history.T[1], label='estimated_position')
 plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
