@@ -9,7 +9,7 @@ import scipy.io as sio
 
 
 class Estimator:
-    def __init__(self, initial, landmarks, alpha=[0.5, 0.01, 0.5, 0.1], sigR=1.0, sigB=1.0, al=1.0 ,kap=1.0):
+    def __init__(self, initial, landmarks, alpha=[0.5, 0.1, 0.1, 2.0], sigR=100.0, sigB=500.0, al=1.0 ,kap=1.0):
         self.x_hat = initial
         self.P = np.diag([0.0001,0.0001,0.0001]) # np.eye(self.x_hat.shape[0]) * 0.1
         self.landmarks = landmarks
@@ -66,9 +66,9 @@ class Estimator:
             P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, self.R]]))
 
             L = np.linalg.cholesky(P_a)
-            chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
+            self.chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
 
-            meas_idx = np.array([2*vis_lm, 2*vis_lm])
+            meas_idx = np.array([2*vis_lm, 2*vis_lm + 1])
 
             Zbar = np.empty((2,2*5 + 1))
             for j in range(2*5 + 1):
@@ -195,7 +195,7 @@ for i, (t, dt) in enumerate(zip(odometry_t, np.diff(np.concatenate([[0],odometry
         plt.scatter(x, y)
         plt.scatter(x + 0.25*np.cos(t), y + 0.25*np.sin(t), color='r')
         plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
-        plt.pause(0.5)
+        plt.pause(0.00001)
 plt.ioff()
 
 x_history = np.array(x_history)
