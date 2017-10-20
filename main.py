@@ -5,13 +5,13 @@ from scipy.stats import multivariate_normal
 import scipy.io as sio
 
 # large plots for ipython notebook
-matplotlib.rcParams['figure.figsize'] = (17.0, 17.0)
+# matplotlib.rcParams['figure.figsize'] = (17.0, 17.0)
 
 
 class Estimator:
-    def __init__(self, initial, landmarks, alpha=[1.0, 0.01, 10.0, 0.1], sigR=1.0, sigB=1.0, al=1.0 ,kap=1.0):
+    def __init__(self, initial, landmarks, alpha=[0.5, 0.01, 0.5, 0.1], sigR=1.0, sigB=1.0, al=1.0 ,kap=1.0):
         self.x_hat = initial
-        self.P = np.diag([0.1,0.1,np.pi/2]) # np.eye(self.x_hat.shape[0]) * 0.1
+        self.P = np.diag([0.0001,0.0001,0.0001]) # np.eye(self.x_hat.shape[0]) * 0.1
         self.landmarks = landmarks
         self.alpha = alpha
         self.R = np.diag([sigR,sigB])
@@ -30,7 +30,7 @@ class Estimator:
             w = u[1,0]
         print "!!!!!propagate!!!!!"
         x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
-        Qu = np.diag([0.01 + (self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), 0.01 + (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
+        Qu = np.diag([0.001 + (self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), 0.001 + (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
         Z_2 = np.zeros((2,2))
         Z_3 = np.zeros((3,2))
         P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, Qu]]))
@@ -39,7 +39,6 @@ class Estimator:
         chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
 
         # g(u + chi_u,chi_x)
-        chi_a_p = chi_a.copy()
         for i in range(2*5 + 1):
             chi_a[0:3,i:i+1] = self.dynamics(dt, chi_a[0:3,i:i+1], u + chi_a[3:5,i:i+1])
 
@@ -58,49 +57,45 @@ class Estimator:
         # then remove all the nans, only leaving the landmarks we can see
         # additionally, visible_landmarks contains a vector of visible landmark indexes
         visible_landmarks = np.where(~np.isnan(z[::2, 0]))[0]
-        # print "visible_landmarks", visible_landmarks
-        visible_landmarks = visible_landmarks
 
-        # regenerate simga points
-        x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
-        Z_3 = np.zeros((3,2))
-        P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, self.R]]))
+        for vis_lm in visible_landmarks:
 
-        L = np.linalg.cholesky(P_a)
-        chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
+            # regenerate simga points
+            x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
+            Z_3 = np.zeros((3,2))
+            P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, self.R]]))
 
-        # I think we need it to make all of the measurement updates in one
-        # i.e. only one update of x_hat, P no matter how many landmarks are visible
-        meas_idx = []
-        adder = np.empty((2*len(visible_landmarks), 2*5 + 1))
-        for idx, v in enumerate(visible_landmarks):
-            meas_idx.append(v*2)
-            meas_idx.append(v*2 + 1)
-            adder[idx:idx+2, :] = chi_a[3:5, :]
-        # lma = self.landmarks[visible_landmarks,:].T
-        # Zbar = np.empty((2,2*5 + 1))
-        Zbar = np.empty((2*len(visible_landmarks),2*5 + 1))
-        for j in range(2*5 + 1):
+            L = np.linalg.cholesky(P_a)
+            chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
 
-            Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + adder[:,j:j+1]
-            # Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + self.chi_a[3:5,j:j+1]
-        zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
-        # print "Zbar", Zbar
-        # print "zhat", zhat
-        # print "z", z[meas_idx]
+            meas_idx = np.array([2*vis_lm, 2*vis_lm])
 
-        S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
-        P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
-        K = P_Ct.dot(np.linalg.inv(S))
+            Zbar = np.empty((2,2*5 + 1))
+            for j in range(2*5 + 1):
+                Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + self.chi_a[3:5,j:j+1]
 
-        residual = z[meas_idx] - zhat
-        if residual[1,:] > np.pi:
-            residual[1,:] -= 2*np.pi
-        if residual[1,:] < -np.pi:
-            residual[1,:] += 2*np.pi
-        print "Residual", residual
-        self.x_hat = self.x_hat + K.dot(residual)
-        self.P = self.P - K.dot(S).dot(K.T)
+            zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
+            # print "Zbar", Zbar
+            # print "zhat", zhat
+            # print "z", z[meas_idx]
+
+            S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
+            P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
+            K = P_Ct.dot(np.linalg.inv(S))
+
+            residual = z[meas_idx] - zhat
+            if residual[1,:] > np.pi:
+                residual[1,:] -= 2*np.pi
+            if residual[1,:] < -np.pi:
+                residual[1,:] += 2*np.pi
+            print "Residual", residual
+
+            dist = residual.T.dot(np.linalg.inv(S)).dot(residual)[0,0]
+            if dist < 9:
+                self.x_hat = self.x_hat + K.dot(residual)
+                self.P = self.P - K.dot(S).dot(K.T)
+            else:
+                print "gated a measurement", np.sqrt(dist)
 
         return self.x_hat, self.P
 
@@ -194,11 +189,13 @@ for i, (t, dt) in enumerate(zip(odometry_t, np.diff(np.concatenate([[0],odometry
     p_history.append(P)
 
     [[x],[y],[t]] = x_hat
-    plt.clf()
-    plt.scatter(x, y)
-    plt.scatter(x + 0.5*np.cos(t), y + 0.5*np.sin(t), color='r')
-    plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
-    plt.pause(0.00001)
+    if False:
+        plt.clf()
+        plt.axis([-3, 9, -3, 15])
+        plt.scatter(x, y)
+        plt.scatter(x + 0.25*np.cos(t), y + 0.25*np.sin(t), color='r')
+        plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
+        plt.pause(0.5)
 plt.ioff()
 
 x_history = np.array(x_history)
@@ -221,4 +218,9 @@ plt.plot(odometry_pos.T[0], odometry_pos.T[1], label='odometry_position')
 plt.plot(x_history.T[0], x_history.T[1], label='estimated_position')
 plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
 plt.legend(loc='upper left')
+
+plt.figure(3)
+plt.plot(odometry_t, x_history[:,2])
 plt.show()
+
+plt.figure(3)
