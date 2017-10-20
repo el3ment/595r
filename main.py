@@ -9,9 +9,9 @@ import scipy.io as sio
 
 
 class Estimator:
-    def __init__(self, initial, landmarks, alpha=[0.5, 0.01, 0.5, 0.1], sigR=1.0, sigB=1.0, al=1.0 ,kap=1.0):
+    def __init__(self, initial, landmarks, alpha=[0.5, 0.01, 0.01, 0.5], sigR=0.5, sigB=0.75, al=1.0 ,kap=1.0):
         self.x_hat = initial
-        self.P = np.diag([0.0001,0.0001,0.0001]) # np.eye(self.x_hat.shape[0]) * 0.1
+        self.P = np.diag([1., 1., 0.5]) # np.eye(self.x_hat.shape[0]) * 0.1
         self.landmarks = landmarks
         self.alpha = alpha
         self.R = np.diag([sigR,sigB])
@@ -20,6 +20,9 @@ class Estimator:
         self.gamma = np.sqrt(5 + self.lamb)
         self.w_m = np.concatenate(([[self.lamb/(5 + self.lamb)]], np.ones((1,2*5))/2/(5 + self.lamb)), axis=1)
         self.w_c = np.concatenate(([[self.lamb/(5 + self.lamb) + (1 - al**2 + 2)]], np.ones((1,2*5))/2/(5 + self.lamb)), axis=1)
+        print self.w_c
+        print sum(self.w_c[0,:])
+        print sum(self.w_m[0,:])
 
     def propagate(self, dt, u):
         if u.sum() == 0:
@@ -30,7 +33,7 @@ class Estimator:
             w = u[1,0]
         print "!!!!!propagate!!!!!"
         x_a = np.concatenate((self.x_hat, np.zeros((2, 1))), axis=0)
-        Qu = np.diag([0.001 + (self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), 0.001 + (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
+        Qu = np.diag([(self.alpha[0]*np.abs(v)**2 + self.alpha[1]*np.abs(w)**2), (self.alpha[2]*np.abs(v)**2 + self.alpha[3]*np.abs(w)**2)])
         Z_2 = np.zeros((2,2))
         Z_3 = np.zeros((3,2))
         P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, Qu]]))
@@ -66,7 +69,7 @@ class Estimator:
             P_a = np.asarray(np.bmat([[self.P, Z_3], [Z_3.T, self.R]]))
 
             L = np.linalg.cholesky(P_a)
-            chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
+            self.chi_a = np.concatenate((x_a, x_a + self.gamma*L, x_a - self.gamma*L), axis=1)
 
             meas_idx = np.array([2*vis_lm, 2*vis_lm])
 
@@ -75,9 +78,6 @@ class Estimator:
                 Zbar[:,j:j+1] = self.measure(self.chi_a[0:3,j:j+1])[meas_idx] + self.chi_a[3:5,j:j+1]
 
             zhat = np.atleast_2d(np.sum(self.w_m*Zbar,axis=1)).T
-            # print "Zbar", Zbar
-            # print "zhat", zhat
-            # print "z", z[meas_idx]
 
             S = (self.w_c*(Zbar - zhat)).dot((Zbar - zhat).T)
             P_Ct = (self.w_c*(self.chi_a[0:3,:] - self.x_hat)).dot((Zbar - zhat).T)
@@ -217,7 +217,7 @@ plt.figure(2)
 plt.plot(odometry_pos.T[0], odometry_pos.T[1], label='odometry_position')
 plt.plot(x_history.T[0], x_history.T[1], label='estimated_position')
 plt.plot(landmarks.T[0], landmarks.T[1], 'o', label='landmarks')
-plt.legend(loc='upper left')
+# plt.legend(loc='upper left')
 
 plt.figure(3)
 plt.plot(odometry_t, x_history[:,2])
